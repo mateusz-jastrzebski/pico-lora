@@ -68,14 +68,15 @@
 #endif
 
 LoRaClass::LoRaClass() : 
-      _spi(SPI_PORT),
-      _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), 
-      _frequency(0), 
-      _packetIndex(0),
-      _implicitHeaderMode(0), 
-      _onReceive(NULL), 
-      _onCadDone(NULL),
-      _onTxDone(NULL) 
+  _spi(SPI_PORT),
+  _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), 
+  _pin_miso(LORA_PIN_MISO_DEFAULT), _pin_sck(LORA_PIN_SCK_DEFAULT), _pin_mosi(LORA_PIN_MOSI_DEFAULT),
+  _frequency(0), 
+  _packetIndex(0),
+  _implicitHeaderMode(0), 
+  _onReceive(NULL), 
+  _onCadDone(NULL),
+  _onTxDone(NULL) 
 {}
 
 int LoRaClass::begin(long frequency) 
@@ -99,28 +100,37 @@ int LoRaClass::begin(long frequency)
   }
 
 
-  // start SPI
-  spi_init(SPI_PORT, 12500);
-  gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
-  gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
-  gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
+  // SPI bus assumed already initialised by application; just ensure pins are set and baudrate reasonable
+  gpio_set_function(_pin_miso, GPIO_FUNC_SPI);
+  gpio_set_function(_pin_sck, GPIO_FUNC_SPI);
+  gpio_set_function(_pin_mosi, GPIO_FUNC_SPI);
+  spi_set_baudrate(SPI_PORT, (uint32_t)LORA_DEFAULT_SPI_FREQUENCY);
 
 
   // Make the SPI pins available to picotool
-  bi_decl(bi_3pins_with_func(PIN_MISO, PIN_MOSI, PIN_SCK, GPIO_FUNC_SPI));
+  bi_decl(bi_3pins_with_func(_pin_miso, _pin_mosi, _pin_sck, GPIO_FUNC_SPI));
 
-  gpio_init(PIN_CS);
-  gpio_set_dir(PIN_CS, GPIO_OUT);
-  gpio_put(PIN_CS, 1);
+  gpio_init(_ss);
+  gpio_set_dir(_ss, GPIO_OUT);
+  gpio_put(_ss, 1);
 
   // Make the CS pin available to picotool
-  bi_decl(bi_1pin_with_name(PIN_CS, "SPI CS"));
+  bi_decl(bi_1pin_with_name(_ss, "LoRa SPI CS"));
 
   // check version
+  // temporarily slow SPI for reliable first access
+  uint32_t prev_baud = spi_get_baudrate(SPI_PORT);
+  spi_set_baudrate(SPI_PORT, 1000000);
+  sleep_ms(2);
   uint8_t version = readRegister(REG_VERSION);
   if (version != 0x12) {
+    printf("LoRa: unexpected version 0x%02X (expected 0x12)\n", version);
+    // restore baudrate
+    spi_set_baudrate(SPI_PORT, prev_baud);
     return 0;
   }
+  // restore baud then continue
+  spi_set_baudrate(SPI_PORT, prev_baud);
 
   // put in sleep mode
   sleep();
@@ -665,12 +675,21 @@ void LoRaClass::setSPIFrequency(uint32_t frequency)
   spi_set_baudrate(SPI_PORT, frequency);
 }
 
+void LoRaClass::setSPIPins(int miso, int sck, int mosi)
+{
+  _pin_miso = miso;
+  _pin_sck = sck;
+  _pin_mosi = mosi;
+}
+
 void LoRaClass::dumpRegisters() 
 {
   for (int i = 0; i < 128; i++) {
     printf("0x%x: 0x%x\n", i, readRegister(i));
   }
 }
+
+uint8_t LoRaClass::getVersion() { return readRegister(REG_VERSION); }
 
 void LoRaClass::explicitHeaderMode() 
 {

@@ -11,10 +11,11 @@
 #include "string.h"
 #include "Print.h"
 
-#define PIN_MISO 16
-#define PIN_CS   8
-#define PIN_SCK  18
-#define PIN_MOSI 19
+// Default LoRa SPI pin assignments (renamed to avoid collision with project-wide PIN_* macros)
+#define LORA_PIN_MISO_DEFAULT 16
+#define LORA_PIN_CS_DEFAULT   8
+#define LORA_PIN_SCK_DEFAULT  18
+#define LORA_PIN_MOSI_DEFAULT 19
 
 #define SPI_PORT spi0
 #define READ_BIT 0x80
@@ -96,8 +97,10 @@ public:
   void setPins(int ss = LORA_DEFAULT_SS_PIN, int reset = LORA_DEFAULT_RESET_PIN, int dio0 = LORA_DEFAULT_DIO0_PIN);
   void setSPI(spi_inst_t &spi);
   void setSPIFrequency(uint32_t frequency);
+  void setSPIPins(int miso, int sck, int mosi); // configure which GPIOs are used for SPI (must match already-initialised bus)
 
   void dumpRegisters();
+  uint8_t getVersion(); // read silicon version register (0x42)
 
 private:
   void explicitHeaderMode();
@@ -123,6 +126,9 @@ private:
   int _ss;
   int _reset;
   int _dio0;
+  int _pin_miso;
+  int _pin_sck;
+  int _pin_mosi;
   long _frequency;
   int _packetIndex;
   int _implicitHeaderMode;
