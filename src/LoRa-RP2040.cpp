@@ -1,5 +1,4 @@
 #include "LoRa-RP2040.h"
-#include "pico/time.h"
 
 // registers
 #define REG_FIFO                 0x00
@@ -69,19 +68,15 @@
 #endif
 
 LoRaClass::LoRaClass() : 
-  _spi(SPI_PORT),
-  _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), 
-  _pin_miso(4), _pin_sck(2), _pin_mosi(3),
-  _frequency(0), 
-  _packetIndex(0),
-  _implicitHeaderMode(0), 
-  _onReceive(NULL), 
-  _onCadDone(NULL),
-  _onTxDone(NULL) 
-{
-  printf("[LORA] Constructor: SS=%d, RESET=%d, DIO0=%d, MISO=%d, SCK=%d, MOSI=%d\n", 
-         _ss, _reset, _dio0, _pin_miso, _pin_sck, _pin_mosi);
-}
+      _spi(SPI_PORT),
+      _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), 
+      _frequency(0), 
+      _packetIndex(0),
+      _implicitHeaderMode(0), 
+      _onReceive(NULL), 
+      _onCadDone(NULL),
+      _onTxDone(NULL) 
+{}
 
 int LoRaClass::begin(long frequency) 
 {
@@ -89,13 +84,14 @@ int LoRaClass::begin(long frequency)
   // setup pins
   gpio_init(_ss);
   gpio_set_dir(_ss, GPIO_OUT);
-  gpio_put(_ss, 1);
+  // set SS high
   gpio_put(_ss, 1);
 
   if (_reset != -1) {
     gpio_init(_reset);
     gpio_set_dir(_reset, GPIO_OUT);
 
+    // perform reset
     gpio_put(_reset, 0);
     sleep_ms(10);
     gpio_put(_reset, 1);
@@ -103,36 +99,28 @@ int LoRaClass::begin(long frequency)
   }
 
 
-  gpio_set_function(_pin_miso, GPIO_FUNC_SPI);
-  gpio_set_function(_pin_sck, GPIO_FUNC_SPI);
-  gpio_set_function(_pin_mosi, GPIO_FUNC_SPI);
-  spi_set_baudrate(SPI_PORT, (uint32_t)LORA_DEFAULT_SPI_FREQUENCY);
+  // start SPI
+  spi_init(SPI_PORT, 12500);
+  gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
+  gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
+  gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
 
 
   // Make the SPI pins available to picotool
-  bi_decl(bi_3pins_with_func(_pin_miso, _pin_mosi, _pin_sck, GPIO_FUNC_SPI));
+  bi_decl(bi_3pins_with_func(PIN_MISO, PIN_MOSI, PIN_SCK, GPIO_FUNC_SPI));
 
-  gpio_init(_ss);
-  gpio_set_dir(_ss, GPIO_OUT);
-  gpio_put(_ss, 1);
+  gpio_init(PIN_CS);
+  gpio_set_dir(PIN_CS, GPIO_OUT);
+  gpio_put(PIN_CS, 1);
 
   // Make the CS pin available to picotool
-  bi_decl(bi_1pin_with_name(_ss, "LoRa SPI CS"));
+  bi_decl(bi_1pin_with_name(PIN_CS, "SPI CS"));
 
   // check version
-  // temporarily slow SPI for reliable first access
-  uint32_t prev_baud = spi_get_baudrate(SPI_PORT);
-  spi_set_baudrate(SPI_PORT, 1000000);
-  sleep_ms(2);
   uint8_t version = readRegister(REG_VERSION);
   if (version != 0x12) {
-    printf("LoRa: unexpected version 0x%02X (expected 0x12)\n", version);
-    // restore baudrate
-    spi_set_baudrate(SPI_PORT, prev_baud);
     return 0;
   }
-  // restore baud then continue
-  spi_set_baudrate(SPI_PORT, prev_baud);
 
   // put in sleep mode
   sleep();
@@ -200,17 +188,9 @@ int LoRaClass::endPacket(bool async)
   writeRegister(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
 
   if (!async) {
-    // wait for TX done with timeout
-    uint32_t start_time = to_ms_since_boot(get_absolute_time());
-    const uint32_t timeout_ms = 5000; // 5 second timeout
+    // wait for TX done
     while ((readRegister(REG_IRQ_FLAGS) & IRQ_TX_DONE_MASK) == 0) {
-      uint32_t elapsed = to_ms_since_boot(get_absolute_time()) - start_time;
-      if (elapsed > timeout_ms) {
-        printf("[LORA] TX timeout after %lums\n", timeout_ms);
-        idle(); // return to standby
-        return 0; // indicate failure
-      }
-      sleep_ms(1);
+      sleep_ms(0);
     }
     // clear IRQ's
     writeRegister(REG_IRQ_FLAGS, IRQ_TX_DONE_MASK);
@@ -685,21 +665,12 @@ void LoRaClass::setSPIFrequency(uint32_t frequency)
   spi_set_baudrate(SPI_PORT, frequency);
 }
 
-void LoRaClass::setSPIPins(int miso, int sck, int mosi)
-{
-  _pin_miso = miso;
-  _pin_sck = sck;
-  _pin_mosi = mosi;
-}
-
 void LoRaClass::dumpRegisters() 
 {
   for (int i = 0; i < 128; i++) {
     printf("0x%x: 0x%x\n", i, readRegister(i));
   }
 }
-
-uint8_t LoRaClass::getVersion() { return readRegister(REG_VERSION); }
 
 void LoRaClass::explicitHeaderMode() 
 {
@@ -752,8 +723,7 @@ void LoRaClass::handleDio0Rise()
 
 uint8_t LoRaClass::readRegister(uint8_t address) 
 {
-  uint8_t result = singleTransfer(address & 0x7f, 0x00);
-  return result;
+  return singleTransfer(address & 0x7f, 0x00);
 }
 
 void LoRaClass::writeRegister(uint8_t address, uint8_t value) 
